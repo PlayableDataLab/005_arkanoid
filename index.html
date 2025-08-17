@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Arkanoid — Airbnb Grid (No-Overlay Layout)</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg1:#0b1020; --bg2:#111b33; --glass:rgba(255,255,255,.08);
+    --fg:#e6eaf5; --muted:#a7b0c5; --accent:#9AE6B4; --warn:#EE6B63;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font-family:"Space Grotesk",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+    background: radial-gradient(1200px 800px at 20% 10%, #1c2a4a 0%, var(--bg2) 40%, var(--bg1) 100%);
+    color:var(--fg);
+  }
+
+  /* ========== LAYOUT: no panels over the canvas ========== */
+  #app{
+    display:grid;
+    grid-template-columns: 330px 1fr 280px;
+    grid-template-rows: 100vh;
+    gap:12px;
+    padding:12px;
+  }
+  .sidebar{display:flex; flex-direction:column; gap:12px; min-height:0;}
+  #center{min-width:0; min-height:0; display:grid; place-items:center;}
+  #canvasWrap{
+    width:100%; height:100%;
+    border-radius: 20px;
+    background: radial-gradient(1300px 900px at 70% 40%, rgba(255,255,255,.04), rgba(255,255,255,0) 55%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.05), 0 20px 70px rgba(0,0,0,.45);
+    overflow:hidden;
+  }
+  canvas{width:100%; height:100%; display:block;}
+
+  /* Panels */
+  .panel{
+    backdrop-filter: blur(8px);
+    background: var(--glass);
+    border: 1px solid rgba(255,255,255,.08);
+    box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.04);
+    border-radius: 16px; padding:12px 14px;
+  }
+  #title{font-weight:700; letter-spacing:.2px; line-height:1.1; display:flex; flex-direction:column; gap:2px;}
+  #subtitle{font-size:.9rem; color:var(--muted)}
+  #legend .bar{
+    height:10px; border-radius:999px; margin:8px 0 6px;
+    background: linear-gradient(90deg,#e8f7ff,#9edbf5,#5fb7e1,#3d8cc9,#2f60a8,#203b84,#142055);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.04);
+  }
+  #legend .ticks{display:flex; justify-content:space-between; font-size:.8rem; color:var(--muted)}
+  #stats{display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+  .chip{
+    display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:12px;
+    background:var(--glass); border: 1px solid rgba(255,255,255,.08);
+    font-size:.95rem;
+  }
+  .chip strong{font-weight:700}
+  #progressWrap{width:220px; height:8px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden;}
+  #progress{height:100%; width:0%; background:linear-gradient(90deg,#41f0a5,#73fbd3,#9AE6B4)}
+
+  #leaderboard h3{margin:0 0 6px 0; font-size:1rem}
+  #lbList{list-style:none; margin:0; padding:0; display:grid; gap:6px}
+  #lbList li{
+    display:grid; grid-template-columns: 46px 1fr auto; gap:8px;
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:6px 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  #lbList .rank{opacity:.8; text-align:center}
+  #lbList .who{font-weight:700}
+  #lbList .meta{opacity:.8; font-size:.9rem}
+
+  /* Toast & overlay still fixed (they pop over everything, not panels) */
+  #toast{
+    position:fixed; left:50%; transform:translateX(-50%); bottom:20px;
+    background:rgba(17,27,51,.8); border:1px solid rgba(255,255,255,.08); border-radius:14px;
+    padding:10px 14px; font-weight:600; opacity:0; transition:opacity .25s, transform .25s; z-index:50;
+  }
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(-6px)}
+  #overlay{
+    position:fixed; inset:0; display:none; place-items:center; z-index:60;
+    background:rgba(5,8,16,.55); backdrop-filter: blur(6px);
+  }
+  #overlay .card{
+    background:var(--glass); border:1px solid rgba(255,255,255,.12); border-radius:18px; padding:18px 22px; text-align:center; width:min(92vw, 420px);
+  }
+  .field{display:flex; gap:8px; align-items:center; justify-content:center; margin:10px 0 4px;}
+  .field input{
+    width:86px; text-transform:uppercase; text-align:center; letter-spacing:1px;
+    background:rgba(255,255,255,.07); color:var(--fg); border:1px solid rgba(255,255,255,.15);
+    border-radius:10px; padding:8px 10px; font-weight:700; font-size:1.2rem; outline:none;
+  }
+  .overlay-rows{display:grid; gap:6px; margin:8px 0 12px; font-variant-numeric: tabular-nums;}
+  .btnrow{display:flex; gap:8px; justify-content:center}
+  button{
+    appearance:none; border:none; border-radius:12px; padding:10px 14px; font-weight:700; cursor:pointer;
+    background:linear-gradient(90deg,#41f0a5,#73fbd3); color:#071018; box-shadow:0 6px 22px rgba(65,240,165,.25);
+  }
+  button.secondary{background:rgba(255,255,255,.08); color:var(--fg); border:1px solid rgba(255,255,255,.12); box-shadow:none;}
+
+  /* Responsive: stack panels above/below canvas on narrow screens */
+  @media (max-width: 1024px){
+    #app{
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr auto;
+    }
+    #right{order:3}
+  }
+</style>
+</head>
+<body>
+  <div id="app">
+    <!-- LEFT SIDEBAR -->
+    <div id="left" class="sidebar">
+      <div class="panel" id="title">
+        <div>Arkanoid — Barcelona Airbnb</div>
+        <div id="subtitle">500 m grid · Listings choropleth </div>
+      </div>
+
+      <div class="panel" id="legend">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px">
+          <div style="font-weight:700">Choropleth: listings</div>
+          <div style="font-size:.8rem; color:var(--muted)">higher → darker</div>
+        </div>
+        <div class="bar"></div>
+        <div class="ticks"><span id="minVal">0</span><span id="midVal">—</span><span id="maxVal">—</span></div>
+      </div>
+
+      <div class="panel" id="stats">
+        <div class="chip"><span>🎯 Score</span><strong id="score">0</strong></div>
+        <div class="chip"><span>💔 Lives lost</span><strong id="livesLost">0</strong></div>
+        <div class="chip"><span>🔥 Combo</span><strong id="combo">x1</strong></div>
+        <div class="chip"><span>⏱ Time</span><strong id="timer">00:00</strong></div>
+        <div class="chip"><span>🧱 Remaining</span><strong id="remain">—</strong></div>
+        <div class="chip" style="gap:10px"><span>🏁 Progress</span><div id="progressWrap"><div id="progress"></div></div></div>
+      </div>
+
+      <div class="panel" id="leaderboard">
+        <h3>🏆 Leaderboard (local)</h3>
+        <ol id="lbList"></ol>
+      </div>
+    </div>
+
+    <!-- CENTER: GAME -->
+    <div id="center">
+      <div id="canvasWrap">
+        <canvas id="game"></canvas>
+      </div>
+    </div>
+
+    <!-- RIGHT SIDEBAR -->
+    <div id="right" class="sidebar">
+      <div id="hint" class="panel"><p>Move with <b>← →</b> or <b>mouse</b>. Clear a full row → wall descends. Miss = reset ball (life +1). High combo = bigger points.</p></div>
+      <div id="info" class="panel">
+        <b>Last cell</b>
+        <div class="row"><span class="label" style="color:var(--muted);width:78px">Area</span><span id="areaName">—</span></div>
+        <div class="row"><span class="label" style="color:var(--muted);width:78px">Listings</span><span id="areaCount">—</span></div>
+        <div class="row"><span class="label" style="color:var(--muted);width:78px">Centroid</span><span id="areaCoord">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <!-- Overlay (submit score) -->
+  <div id="overlay">
+    <div class="card">
+      <h2 style="margin:8px 0 2px">Round complete!</h2>
+      <div class="overlay-rows">
+        <div><b>Final score:</b> <span id="finalScoreText">—</span></div>
+        <div><b>Time:</b> <span id="finalTimeText">—</span> · <b>Best combo:</b> <span id="finalComboText">—</span> · <b>Lives lost:</b> <span id="finalLivesText">—</span></div>
+      </div>
+      <div class="field">
+        <label for="initials"><b>Enter initials</b></label>
+        <input id="initials" maxlength="3" placeholder="AAA" />
+      </div>
+      <div class="btnrow">
+        <button id="saveScoreBtn">Save score</button>
+        <button class="secondary" id="restartBtn">Play again</button>
+        <button class="secondary" id="closeBtn">Close</button>
+      </div>
+      <p style="margin:10px 0 0; font-size:.85rem; color:var(--muted)">Scores are saved in this browser. For a shared/public board we’ll add a tiny backend.</p>
+    </div>
+  </div>
+
+<script>
+/* =========================
+   Arkanoid — Advancing Wall + Combos + Leaderboard
+   ========================= */
+
+/*** DATA SOURCE ***/
+const GEOJSON_URL = 'BCN_grid500_count.geojson';
+
+/*** GAME CONSTANTS (tune here) ***/
+const PADDLE = { w: 150, h: 12, speed: 8 };
+const BALL = { r: 9, start: 5.2, max: 11.5 };
+const COMBO_STEP = 0.15;     // +15% per hit in same life
+const COMBO_CAP  = 2.0;      // up to +200%
+const TIME_BONUS_BASE = 2000;// max bonus if super fast
+const TIME_BONUS_RATE = 10;  // minus 10 points per second
+const LIFE_PENALTY     = 50; // -50 per lost life
+const LEADERBOARD_SIZE = 10;
+const LS_KEY = 'arkanoid_leaderboard_v1';
+
+/*** CANVAS ***/
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d', { alpha: true });
+let dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+
+function resizeCanvas(){
+  // canvas occupies full center area; use its CSS size
+  const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+  dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.scale(dpr, dpr);
+  if(geoReady) buildProjectionAndPaths();
+}
+window.addEventListener('resize', resizeCanvas);
+
+/*** HUD SHORTCUTS ***/
+const $ = sel => document.querySelector(sel);
+const scoreEl = $('#score'), remainEl = $('#remain');
+const minEl = $('#minVal'), midEl = $('#midVal'), maxEl = $('#maxVal');
+const progressBar = $('#progress');
+const livesLostEl = $('#livesLost');
+const comboEl = $('#combo');
+const timerEl = $('#timer');
+const areaNameEl = $('#areaName'), areaCountEl = $('#areaCount'), areaCoordEl = $('#areaCoord');
+const toast = $('#toast');
+const overlay = $('#overlay');
+const finalScoreText = $('#finalScoreText');
+const finalTimeText = $('#finalTimeText');
+const finalComboText = $('#finalComboText');
+const finalLivesText = $('#finalLivesText');
+const initialsInput = $('#initials');
+const lbList = $('#lbList');
+
+function flash(msg){
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(flash._t);
+  flash._t = setTimeout(()=> toast.classList.remove('show'), 900);
+}
+
+/*** COLOR SCALE ***/
+const palette = [
+  [232,247,255],[158,219,245],[95,183,225],[61,140,201],[47,96,168],[32,59,132],[20,32,85]
+];
+function lerp(a,b,t){return a+(b-a)*t}
+function clamp01(v){return Math.max(0,Math.min(1,v))}
+function colorFor(t){
+  t = clamp01(t);
+  const s = (palette.length-1) * t;
+  const i = Math.floor(s);
+  const f = s - i;
+  const c0 = palette[i], c1 = palette[Math.min(i+1, palette.length-1)];
+  const r = Math.round(lerp(c0[0],c1[0],f));
+  const g = Math.round(lerp(c0[1],c1[1],f));
+  const b = Math.round(lerp(c0[2],c1[2],f));
+  return `rgb(${r},${g},${b})`;
+}
+
+/*** GEO → BRICKS ***/
+let features=[], bricks=[], paths=[];
+let minVal=Infinity, maxVal=-Infinity, totalVal=0;
+let bbox = {minLon:0, maxLon:1, minLat:0, maxLat:1};
+let geoReady = false;
+let valueKey = null, nameKey = null;
+
+function pickValueProperty(props){
+  const keys = Object.keys(props||{});
+  const candidates = keys.filter(k => typeof props[k] === 'number' && isFinite(props[k]));
+  if(!candidates.length) return null;
+  const pref = ['count','list','bnb','air','total','num'];
+  const scored = candidates.map(k=>{
+    const kn=k.toLowerCase();
+    const score = pref.reduce((s,p)=> s + (kn.includes(p)?1:0), 0);
+    return {k,score};
+  }).sort((a,b)=> b.score - a.score || a.k.localeCompare(b.k));
+  if(scored[0].score===0){
+    let best = candidates[0], bestVal = props[best];
+    for(const k of candidates){ if(props[k] > bestVal){ best = k; bestVal = props[k]; } }
+    return best;
+  }
+  return scored[0].k;
+}
+function pickNameProperty(props){
+  const keys = Object.keys(props||{});
+  const namePrefs = ['area','zone','neigh','barr','barri','district','districte','ward','seccion','seccio','municipi','name','nom','nombre','id'];
+  const textKeys = keys.filter(k => typeof props[k] === 'string' && props[k]);
+  const sc = textKeys.map(k=>{
+    const kn=k.toLowerCase();
+    const score = namePrefs.reduce((s,p)=> s + (kn.includes(p)?1:0), 0);
+    return {k,score};
+  }).sort((a,b)=> b.score - a.score || a.k.localeCompare(b.k));
+  return sc[0]?.k || null;
+}
+
+fetch(GEOJSON_URL).then(r=>r.json()).then(g=>{
+  if(!g || !g.features) throw new Error('Invalid GeoJSON');
+  features = g.features;
+
+  for(const f of features){
+    valueKey = valueKey || pickValueProperty(f.properties||{});
+    nameKey  = nameKey  || pickNameProperty(f.properties||{});
+    if(valueKey && nameKey) break;
+  }
+  if(!valueKey) valueKey = 'count';
+
+  const lons=[], lats=[];
+  for(const f of features){
+    const geom = f.geometry;
+    const push = ([lon,lat])=>{ lons.push(lon); lats.push(lat); };
+    if(geom.type==='Polygon'){
+      for(const ring of geom.coordinates) ring.forEach(push);
+    }else if(geom.type==='MultiPolygon'){
+      for(const poly of geom.coordinates) for(const ring of poly) ring.forEach(push);
+    }
+  }
+  bbox.minLon = Math.min(...lons); bbox.maxLon = Math.max(...lons);
+  bbox.minLat = Math.min(...lats); bbox.maxLat = Math.max(...lats);
+
+  minVal = Infinity; maxVal = -Infinity; totalVal = 0;
+  for(const f of features){
+    const v = Number(f.properties?.[valueKey] ?? 0);
+    minVal = Math.min(minVal, v);
+    maxVal = Math.max(maxVal, v);
+    totalVal += Math.max(0, v);
+  }
+  minEl.textContent = String(minVal);
+  midEl.textContent = String(Math.round((minVal+maxVal)/2));
+  maxEl.textContent = String(maxVal);
+
+  resizeCanvas();
+  geoReady = true;
+  startRun();
+  requestAnimationFrame(loop);
+}).catch(err=>{
+  console.error(err);
+  flash('Error loading GeoJSON (check path).');
+});
+
+/*** PROJECTION + PATHS + ROWS ***/
+let project;
+let mapOffsetY = 0;
+let initialMapOffsetY = -160;
+let rowIds = [];
+let rowCounts = [];
+let rowStepPix = 50;
+let rowsY = [];
+const MARGIN_RATIO = 0.08;
+
+function buildProjectionAndPaths(){
+  paths.length=0; bricks.length=0; rowIds.length=0; rowCounts.length=0; rowsY.length=0;
+
+  const mX = canvas.clientWidth * MARGIN_RATIO;
+  const mY = canvas.clientHeight * MARGIN_RATIO;
+  const availW = canvas.clientWidth - 2*mX;
+  const availH = canvas.clientHeight - 2*mY;
+
+  const rangeLon = (bbox.maxLon - bbox.minLon) || 1;
+  const rangeLat = (bbox.maxLat - bbox.minLat) || 1;
+  const scale = Math.min(availW / rangeLon, availH / rangeLat);
+
+  const extraX = availW - scale*rangeLon;
+  const extraY = availH - scale*rangeLat;
+  const ox = mX + extraX/2;
+  const oy = mY + extraY/2;
+
+  project = ([lon,lat])=>[
+    ox + (lon - bbox.minLon) * scale,
+    oy + (bbox.maxLat - lat) * scale
+  ];
+
+  let avgHAcc=0, nH=0;
+
+  features.forEach((f, idx)=>{
+    const v = Number(f.properties?.[valueKey] ?? 0);
+    const geom = f.geometry;
+    const polys = geom.type==='Polygon' ? [geom.coordinates] : geom.coordinates;
+
+    const cellPaths = [];
+    let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+
+    for(const poly of polys){
+      const exterior = poly[0];
+      const p = new Path2D();
+      exterior.forEach((pt,i)=>{
+        const [x,y] = project(pt);
+        if(i===0) p.moveTo(x,y); else p.lineTo(x,y);
+        minx = Math.min(minx,x); miny=Math.min(miny,y); maxx=Math.max(maxx,x); maxy=Math.max(maxy,y);
+      });
+      p.closePath();
+
+      for(let h=1; h<poly.length; h++){
+        const hole = poly[h];
+        p.moveTo(...project(hole[0]));
+        for(let i=1;i<hole.length;i++){
+          const [x,y] = project(hole[i]); p.lineTo(x,y);
+        }
+        p.closePath();
+      }
+      cellPaths.push(p);
+    }
+
+    const t = (maxVal-minVal)>0 ? (v - minVal) / (maxVal - minVal) : 0;
+    const color = colorFor(t);
+
+    // centroid
+    let cLon=0, cLat=0, cN=0;
+    const firstPoly = (geom.type==='Polygon'? geom.coordinates[0] : geom.coordinates[0][0]) || [];
+    for(const pt of firstPoly){ cLon+=pt[0]; cLat+=pt[1]; cN++; }
+    if(cN>0){ cLon/=cN; cLat/=cN; }
+
+    paths.push({ paths: cellPaths, color, value: v });
+
+    const w=(maxx-minx), h=(maxy-miny);
+    bricks.push({
+      x:minx, y:miny, w, h, alive:true, value:v, tint:color, hitTime:0,
+      name: (nameKey ? String(f.properties?.[nameKey] ?? '') : ''),
+      centroid:[cLon,cLat]
+    });
+
+    avgHAcc += h; nH++;
+  });
+
+  // Row grouping
+  const avgH = (nH>0 ? avgHAcc/nH : 40);
+  const thresh = avgH * 0.6;
+  const centers = bricks.map((b,i)=>({i, y:b.y + b.h/2})).sort((a,b)=>a.y-b.y);
+
+  let currentRowY = centers[0]?.y ?? 0;
+  let rowId = 0;
+  rowsY.push(currentRowY);
+  for(const c of centers){
+    if(Math.abs(c.y - currentRowY) > thresh){
+      rowId++; currentRowY = c.y; rowsY.push(currentRowY);
+    }
+    rowIds[c.i] = rowId;
+  }
+  const totalRows = rowId+1;
+  rowCounts = new Array(totalRows).fill(0);
+  bricks.forEach((b,i)=>{ rowCounts[rowIds[i]]++; });
+
+  rowStepPix = Math.max(28, Math.min(120, avgH*0.9));
+  initialMapOffsetY = -Math.min(240, canvas.clientHeight * 0.22);
+  mapOffsetY = initialMapOffsetY;
+
+  remainEl.textContent = bricks.filter(b=>b.alive).length;
+}
+
+/*** GAME STATE ***/
+const paddle = { w: PADDLE.w, h: PADDLE.h, x: 0, y: 0, speed: PADDLE.speed };
+const ball = { x:0, y:0, r:BALL.r, dx:4.2, dy:-4.2, max:BALL.max };
+let score=0, destroyed=0, particles=[], lastHitValue=0;
+let livesLost = 0;
+let combo = 1, bestCombo = 1;
+let startedAt = 0;
+
+function startRun(){
+  startedAt = performance.now();
+  score = 0; destroyed = 0; livesLost = 0; combo=1; bestCombo=1;
+  livesLostEl.textContent = '0';
+  comboEl.textContent = 'x1';
+  scoreEl.textContent = '0';
+  updateTimer();
+  resetBall();
+}
+
+function formatTime(secs){
+  const m = Math.floor(secs/60), s = Math.floor(secs%60);
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+function updateTimer(){
+  const secs = (performance.now() - startedAt)/1000;
+  timerEl.textContent = formatTime(secs);
+}
+
+/*** PARTICLES ***/
+function spawnParticles(x,y,color){
+  for(let i=0;i<12;i++){
+    const a = Math.random()*Math.PI*2;
+    const sp = 2 + Math.random()*3;
+    particles.push({ x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life:500, t:0, color });
+  }
+}
+function updateParticles(dt){
+  for(const p of particles){
+    p.t += dt; p.x += p.vx; p.y += p.vy; p.vy += .04;
+  }
+  particles = particles.filter(p=>p.t < 500);
+}
+
+/*** LIVES + COMBO ***/
+function resetBall(){
+  paddle.x = (canvas.clientWidth - paddle.w)/2;
+  paddle.y = canvas.clientHeight - paddle.h - 22;
+  ball.x = canvas.clientWidth/2;
+  ball.y = paddle.y - ball.r - 6;
+  const s = BALL.start;
+  ball.dx = (Math.random()<.5 ? -1 : 1) * s * .8;
+  ball.dy = -s;
+  combo = 1; comboEl.textContent = 'x1';
+}
+function onMiss(){
+  livesLost++;
+  livesLostEl.textContent = livesLost;
+  resetBall();
+  flash('Miss! Life +1');
+}
+function onBrickCleared(bIndex){
+  const rid = rowIds[bIndex];
+  if(rid==null) return;
+  rowCounts[rid]--;
+  if(rowCounts[rid]===0){
+    mapOffsetY += rowStepPix;
+    flash('Row cleared! Wall advancing');
+  }
+}
+
+/*** INPUT ***/
+const keys = {left:false, right:false};
+window.addEventListener('keydown', e=>{
+  if(e.key==='ArrowLeft') keys.left=true;
+  if(e.key==='ArrowRight') keys.right=true;
+});
+window.addEventListener('keyup', e=>{
+  if(e.key==='ArrowLeft') keys.left=false;
+  if(e.key==='ArrowRight') keys.right=false;
+});
+canvas.addEventListener('mousemove', e=>{
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  paddle.x = Math.max(0, Math.min(canvas.clientWidth - paddle.w, mx - paddle.w/2));
+});
+
+/*** MAIN LOOP ***/
+let last=performance.now();
+function loop(now){
+  const dt = Math.min(40, now - last); last = now;
+  if(geoReady){
+    updateParticles(dt);
+    move(dt);
+    draw();
+  }
+  requestAnimationFrame(loop);
+}
+
+function move(delta){
+  if(keys.left) paddle.x -= paddle.speed;
+  if(keys.right) paddle.x += paddle.speed;
+  paddle.x = Math.max(0, Math.min(canvas.clientWidth - paddle.w, paddle.x));
+
+  ball.x += ball.dx * (delta/16.6);
+  ball.y += ball.dy * (delta/16.6);
+
+  if(ball.x + ball.r > canvas.clientWidth){ ball.x = canvas.clientWidth - ball.r; ball.dx *= -1; }
+  if(ball.x - ball.r < 0){ ball.x = ball.r; ball.dx *= -1; }
+  if(ball.y - ball.r < 0){ ball.y = ball.r; ball.dy *= -1; }
+
+  if(ball.y + ball.r >= paddle.y && ball.y < paddle.y + paddle.h &&
+     ball.x >= paddle.x && ball.x <= paddle.x + paddle.w){
+    ball.dy *= -1;
+    const hit = (ball.x - (paddle.x + paddle.w/2)) / (paddle.w/2);
+    const curSpeed = Math.hypot(ball.dx, ball.dy);
+    const nextSpeed = Math.min(BALL.max, curSpeed + .25);
+    ball.dx = hit * nextSpeed;
+    ball.dy = -Math.sqrt(Math.max(0, nextSpeed*nextSpeed - ball.dx*ball.dx));
+  }
+
+  if(ball.y - ball.r > canvas.clientHeight){ onMiss(); }
+
+  const nowT = performance.now();
+  for(let i=0;i<bricks.length;i++){
+    const b = bricks[i];
+    if(!b.alive) continue;
+    const bx = b.x, by = b.y + mapOffsetY, bw = b.w, bh = b.h;
+
+    if(ball.x > bx && ball.x < bx + bw && ball.y > by && ball.y < by + bh){
+      b.alive = false;
+      destroyed++;
+
+      const mult = Math.min(1 + COMBO_STEP*(combo-1), 1 + COMBO_CAP);
+      const pts = Math.round(Math.max(0, b.value) * mult);
+      score += pts;
+      lastHitValue = pts;
+      combo = Math.min(99, combo + 1);
+      bestCombo = Math.max(bestCombo, combo);
+      comboEl.textContent = 'x' + combo;
+
+      b.hitTime = nowT;
+
+      areaNameEl.textContent = b.name && b.name.trim() ? b.name : '—';
+      areaCountEl.textContent = String(b.value);
+      if(b.centroid && b.centroid.length===2){
+        const [lon,lat] = b.centroid;
+        areaCoordEl.textContent = `${lon.toFixed(5)}, ${lat.toFixed(5)}`;
+      }else{
+        areaCoordEl.textContent = '—';
+      }
+
+      ball.dy *= -1;
+      const s = Math.min(BALL.max, Math.hypot(ball.dx, ball.dy) + .12);
+      const ang = Math.atan2(ball.dy, ball.dx);
+      ball.dx = Math.cos(ang)*s; ball.dy = Math.sin(ang)*s;
+
+      spawnParticles(ball.x, ball.y, b.tint);
+      flash(`+${pts} (combo x${(mult).toFixed(2)})`);
+
+      onBrickCleared(i);
+      break;
+    }
+  }
+
+  scoreEl.textContent = score.toLocaleString('en');
+  const remaining = bricks.filter(b=>b.alive).length;
+  remainEl.textContent = remaining;
+  const pct = totalVal>0 ? Math.min(100, (score/totalVal)*100) : (destroyed/bricks.length)*100;
+  progressBar.style.width = `${pct.toFixed(1)}%`;
+  updateTimer();
+
+  if(remaining===0){ showSubmitOverlay(); }
+}
+
+function draw(){
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  ctx.clearRect(0,0,w,h);
+
+  ctx.save();
+  ctx.translate(0, mapOffsetY);
+  ctx.shadowColor = 'rgba(64,214,255,.12)';
+  ctx.shadowBlur = 10;
+
+  for(let i=0;i<paths.length;i++){
+    const pr = paths[i];
+    const alive = bricks[i].alive;
+    const hitAgo = bricks[i].hitTime ? (performance.now() - bricks[i].hitTime) : Infinity;
+    const isHitFlash = hitAgo < 180;
+
+    if(alive || isHitFlash){
+      ctx.fillStyle = isHitFlash ? '#EE6B63' : pr.color;
+      for(const p of pr.paths) ctx.fill(p);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(255,255,255,.10)';
+      for(const p of pr.paths) ctx.stroke(p);
+    }
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(154,230,180,.45)'; ctx.shadowBlur=18;
+  roundedRect(ctx, paddle.x, paddle.y, paddle.w, paddle.h, 8);
+  ctx.fillStyle = 'white'; ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(115,251,211,.55)'; ctx.shadowBlur=20;
+  ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI*2); ctx.closePath();
+  const grd = ctx.createRadialGradient(ball.x-1, ball.y-1, 1, ball.x, ball.y, ball.r);
+  grd.addColorStop(0,'#ffffff'); grd.addColorStop(1,'#9AE6B4');
+  ctx.fillStyle = grd; ctx.fill(); ctx.restore();
+
+  for(const p of particles){
+    const alpha = 1 - (p.t / 500);
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.fillStyle = p.color || '#fff';
+    ctx.fillRect(p.x-1, p.y-1, 2, 2);
+    ctx.globalAlpha = 1;
+  }
+
+  if(lastHitValue>0){
+    ctx.font = '700 14px "Space Grotesk"';
+    ctx.fillStyle = '#EE6B63';
+    ctx.textAlign = 'right';
+    ctx.fillText(`+${lastHitValue}`, canvas.clientWidth - 14, 24);
+  }
+}
+
+function roundedRect(ctx, x, y, w, h, r){
+  const rr = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rr, y);
+  ctx.arcTo(x+w, y, x+w, y+h, rr);
+  ctx.arcTo(x+w, y+h, x, y+h, rr);
+  ctx.arcTo(x, y+h, x, y, rr);
+  ctx.arcTo(x, y, x+w, y, rr);
+  ctx.closePath();
+}
+
+/*** OVERLAY + LEADERBOARD ***/
+function calcFinalScore(){
+  const secs = (performance.now() - startedAt)/1000;
+  const timeBonus = Math.max(0, TIME_BONUS_BASE - Math.floor(secs)*TIME_BONUS_RATE);
+  const comboBonus = Math.round(Math.max(0, (bestCombo-1) * 20));
+  const penalty = livesLost * LIFE_PENALTY;
+  return {
+    final: Math.max(0, Math.round(score + timeBonus + comboBonus - penalty)),
+    secs: Math.round(secs),
+    timeBonus, comboBonus, penalty
+  };
+}
+function showSubmitOverlay(){
+  if(overlay.style.display === 'grid') return;
+  const meta = calcFinalScore();
+  finalScoreText.textContent = meta.final.toLocaleString('en');
+  finalTimeText.textContent = formatTime(meta.secs);
+  finalComboText.textContent = 'x' + bestCombo;
+  finalLivesText.textContent = String(livesLost);
+  overlay.style.display = 'grid';
+  initialsInput.value = '';
+  initialsInput.focus();
+}
+function loadLB(){
+  try{ return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); }
+  catch{ return []; }
+}
+function saveLB(arr){
+  localStorage.setItem(LS_KEY, JSON.stringify(arr));
+}
+function renderLB(){
+  const arr = loadLB().slice(0, LEADERBOARD_SIZE);
+  lbList.innerHTML = '';
+  if(arr.length===0){
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="rank">—</span><span class="who">No scores yet</span><span class="meta">Play a round!</span>`;
+    lbList.appendChild(li);
+    return;
+  }
+  arr.forEach((e, idx)=>{
+    const li = document.createElement('li');
+    const time = formatTime(e.secs||0);
+    li.innerHTML = `<span class="rank">#${idx+1}</span>
+      <span class="who">${e.initials}</span>
+      <span class="meta">${(e.score||0).toLocaleString('en')} · ${time} · best ${'x'+(e.bestCombo||1)} · 💔${e.lives||0}`;
+    lbList.appendChild(li);
+  });
+}
+
+/*** INIT + CONTROLS ***/
+resizeCanvas();
+renderLB();
+
+document.getElementById('saveScoreBtn').onclick = ()=>{
+  const meta = calcFinalScore();
+  let initials = (initialsInput.value || '').toUpperCase().replace(/[^A-Z]/g,'').slice(0,3);
+  if(!initials) initials = 'AAA';
+  const entry = { initials, score: meta.final, secs: meta.secs, bestCombo, lives: livesLost, ts: Date.now() };
+  const arr = loadLB();
+  arr.push(entry);
+  arr.sort((a,b)=> b.score - a.score || a.secs - b.secs);
+  saveLB(arr.slice(0, LEADERBOARD_SIZE));
+  renderLB();
+  overlay.style.display = 'none';
+  // reset board for replay
+  for(const i in bricks){ bricks[i].alive = true; bricks[i].hitTime = 0; }
+  rowCounts = rowCounts.map((_,rid)=> bricks.reduce((acc,b,bi)=> acc + (rowIds[bi]===rid && b.alive ? 1:0), 0));
+  mapOffsetY = initialMapOffsetY;
+  startRun();
+};
+document.getElementById('restartBtn').onclick = ()=>{
+  overlay.style.display = 'none';
+  for(const i in bricks){ bricks[i].alive = true; bricks[i].hitTime = 0; }
+  rowCounts = rowCounts.map((_,rid)=> bricks.reduce((acc,b,bi)=> acc + (rowIds[bi]===rid && b.alive ? 1:0), 0));
+  mapOffsetY = initialMapOffsetY;
+  startRun();
+};
+document.getElementById('closeBtn').onclick = ()=> overlay.style.display='none';
+</script>
+</body>
+</html>
